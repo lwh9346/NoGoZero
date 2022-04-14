@@ -47,7 +47,7 @@ def _select_and_expand_and_evaluate(t: _TreeNode) -> _TreeNode:
         c = t.children[i]
         x, y = t.actions[i]
         n = c.n if c is not None else 0
-        q = c.w/n if c is not None else 0
+        q = -c.w/n if c is not None else 0  # w代表了子节点的v总和，代表对对手的有利程度，这边需要反过来
         qu = q+c_puct*t.p[x][y]*log_N/(1.+n)
         if qu > max_qu:
             max_qu = qu
