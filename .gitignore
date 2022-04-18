@@ -131,3 +131,10 @@ dmypy.json
 # Pth
 *.pt
 *.pth
+
+# compiled files
+data_generator
+data_generator.exe
+
+# log
+log
