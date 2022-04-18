@@ -31,7 +31,18 @@ class _TreeNode:
             self.board_B = np.copy(parent.board_A)
             x, y = action
             self.board_B[x][y] = 1
-        self.actions = get_legal_actions(self.board_A, self.board_B)
+        action_A = get_legal_actions(self.board_A, self.board_B)
+        action_B = get_legal_actions(self.board_B, self.board_A)
+        if len(action_B) == 0 or len(action_A) == 0:
+            if len(action_A) == 0:
+                self.v = -1
+            else:
+                self.v = 1
+            self.actions = []
+            self.children = []
+            self.p = np.zeros((9, 9))
+            return
+        self.actions = action_A
         self.children = [None]*len(self.actions)
         self.p, self.v = evaluator.eval(
             self.board_A, self.board_B, self.actions)
