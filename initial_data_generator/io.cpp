@@ -10,6 +10,7 @@ using namespace std;
 int main() {
     //计数器与棋盘声明，随机数初始化
     signed char board[81] = {0};
+    srand((unsigned)time(NULL));
 
     //读入数据
     string str;
@@ -30,7 +31,7 @@ int main() {
         }
     }
     mcts::DebugData debugData;
-    mcts::GetBestAction(board, 1000, &debugData);
+    mcts::GetBestAction(board, 10000, &debugData);
 
     for (int i = 0; i < 81; i++) {
         printf("%d ", debugData.nMap[i]);

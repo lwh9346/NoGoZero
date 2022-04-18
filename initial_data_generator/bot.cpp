@@ -92,7 +92,7 @@ private:
         int maxI = 0;
         double logN = log2(t->n); //这里编译器优化失效了，这个常量没有被提取出来，所以我手动提取它
         for (int i = 0; i < t->childrenCount; i++) {
-            double s = t->children[i]->q / double(t->children[i]->n) + 0.2 * sqrt(logN / double(t->children[i]->n)); // UCT公式
+            double s = t->children[i]->q / double(t->children[i]->n) + 0.5 * 0.8326 * sqrt(logN / double(t->children[i]->n)); // UCT公式
             if (s > maxScore) {
                 maxScore = s;
                 maxI = i;
@@ -187,6 +187,15 @@ public:
             double delta = defaultPolicy(t);
             backup(delta, t);
         }
+        if (debug != nullptr) {
+            memset(debug->nMap, 0, 81 * sizeof(int));
+            for (int i = 0; i < root->childrenCount; i++) {
+                debug->nMap[root->childrenAction[i]] = root->children[i]->n;
+            }
+        }
+        if (root->childrenCount == 0) {
+            return -1;
+        }
         int maxN = root->children[0]->n;
         int maxI = 0;
         for (int i = 1; i < root->childrenCount; i++) {
@@ -196,14 +205,6 @@ public:
             }
         }
         int bestAction = root->childrenAction[maxI];
-        if (debug != nullptr) {
-            for (int i = 0; i < 81; i++) {
-                debug->nMap[i] = 0;
-            }
-            for (int i = 0; i < root->childrenCount; i++) {
-                debug->nMap[root->childrenAction[i]] = root->children[i]->n;
-            }
-        }
         deleteTree(root);
         return bestAction;
     }
