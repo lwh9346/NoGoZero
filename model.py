@@ -78,13 +78,13 @@ class Block(nn.Module):
 
 class NoGoNet(nn.Module):
     """
-    输入形状[B,3,9,9]
+    输入形状[B,2,9,9]
     输出形状([B,9,9],[B])，其中前一个是9*9棋盘，另一个是v
     """
 
     def __init__(self, blocks=4):
         super().__init__()
-        self.preproccess = nn.Conv2d(3, 16, kernel_size=3, padding=1)
+        self.preproccess = nn.Conv2d(2, 16, kernel_size=3, padding=1)
         self.blks = []
         for _ in range(blocks):
             self.blks.append(Block(16))
