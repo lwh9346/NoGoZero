@@ -9,6 +9,7 @@ import platform
 import torch
 
 import mcts
+from model import NoGoNet
 import nogo
 
 
@@ -61,7 +62,8 @@ if __name__ == "__main__":
         mcts_fn = _random_mcts_cpp
     else:
         # load torch model
-        mcts.evaluator = mcts.Evaluator()
+        nn = torch.load("models/{}.pt".format(model)).cpu()
+        mcts.evaluator = mcts.NNEvaluator(nn)
         mcts_fn = mcts.mcts
     memory_s = []
     memory_p = []
