@@ -31,7 +31,7 @@ int main() {
         }
     }
     mcts::DebugData debugData;
-    mcts::GetBestAction(board, 10000, &debugData);
+    mcts::GetBestAction(board, 500, &debugData);
 
     for (int i = 0; i < 81; i++) {
         printf("%d ", debugData.nMap[i]);

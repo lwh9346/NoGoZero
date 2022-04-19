@@ -100,8 +100,8 @@ if __name__ == "__main__":
                         z = 1
                     else:
                         z = -1
-                print("game:{} result:{} rounds:{}".format(
-                    ig, z, len(game_memory_s)))
+                print("seed:{} game:{} result:{} rounds:{}".format(
+                    rand_seed, ig, z, len(game_memory_s)))
                 for i in range(len(game_memory_s)):
                     game_memory_z.append(z)
                     z = -z
@@ -118,7 +118,6 @@ if __name__ == "__main__":
                 board_B[x][y] = 1
                 current_player = "A"
             ir += 1
-            print("game:{} round:{}".format(ig, ir))
         # 这边需要去掉结束时的盘面，这个盘面不需要神经网络来判断
         memory_s += game_memory_s[:-1]
         memory_p += game_memory_p[:-1]

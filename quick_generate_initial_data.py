@@ -1,7 +1,17 @@
 import os
 import time
-import platform
-assert platform.system() == "Windows"
-for i in range(0, 16):
-    os.system("start cmd /k python data_generator.py random 5 2.0 {}".format(i))
-    time.sleep(1)
+from multiprocessing import Process
+if __name__ == "__main__":
+    j = 0
+    NUM_WORKERS = 16
+    while True:
+        tasks = []
+        for i in range(j, j+NUM_WORKERS):
+            p = Process(target=os.system, args=[
+                "python3 data_generator.py random 20 2.0 {}".format(i)])
+            tasks.append(p)
+            p.start()
+            time.sleep(1)
+        for p in tasks:
+            p.join()
+        j += NUM_WORKERS
