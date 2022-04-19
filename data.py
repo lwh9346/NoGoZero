@@ -1,6 +1,7 @@
 from typing import Tuple
 import torch
 import os
+import os.path as path
 from torch.utils.data import Dataset
 from random import random
 
@@ -14,6 +15,13 @@ class GameDataSet(Dataset):
         super().__init__()
         global _s, _z, _p
         print("loading data")
+        if _s is None:
+            if path.exists("self_play/{}_cache.pth".format(model_name)):
+                print("loading data from cache")
+                d = torch.load("self_play/{}_cache.pth".format(model_name))
+                _s = d["s"]
+                _p = d["p"]
+                _z = d["z"]
         if _s is None:
             _s, _p, _z = [], [], []
             game_data_files = os.listdir("self_play/{}/".format(model_name))
@@ -29,6 +37,9 @@ class GameDataSet(Dataset):
                 sum = torch.sum(_p[i])
                 assert sum != 0
                 _p[i] /= sum
+            print("saving data to cache")
+            torch.save({"s": _s, "p": _p, "z": _z},
+                       "self_play/{}_cache.pth".format(model_name))
         if train:
             t = int(len(_s)*0.8)
             self.s = _s[:t]
