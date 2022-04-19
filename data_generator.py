@@ -24,7 +24,7 @@ def _random_mcts_cpp(board_A, board_B, max_N):
             input_data[i] = "B"
     input_data.append("\n")
     input_data = "".join(input_data).encode("ASCII")
-    cmd = "data_generator.exe" if platform.system() == "Windows" else "data_generator"
+    cmd = "data_generator.exe" if platform.system() == "Windows" else "./data_generator"
     res = subprocess.run(cmd, input=input_data, capture_output=True)
     res = res.stdout.decode("ASCII")
     res = [int(t) for t in res.split()[:81]]
