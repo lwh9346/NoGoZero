@@ -1,5 +1,7 @@
 from math import log
 import numpy as np
+import torch
+from model import NoGoNet
 
 from nogo import get_legal_actions
 
@@ -14,6 +16,21 @@ class Evaluator:
 
 evaluator = Evaluator()  # 神经网络，或者什么类似的东西，用于指导MCTS
 c_puct = 0.5
+
+
+class NNEvaluator(Evaluator):
+    def __init__(self, model: NoGoNet) -> None:
+        super().__init__()
+        self.model = model
+
+    def eval(self, board_A, board_B, legal_actions) -> tuple[np.ndarray, float]:
+        with torch.no_grad():
+            board_A = torch.tensor(board_A, dtype=torch.float32)
+            board_B = torch.tensor(board_B, dtype=torch.float32)
+            board = torch.unsqueeze(torch.stack([board_A, board_B]), 0)
+            p, v = self.model.forward(board)
+            p = p.reshape((9, 9))
+            return np.array(p), float(v)
 
 
 class _TreeNode:
