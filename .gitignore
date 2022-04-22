@@ -138,3 +138,6 @@ data_generator.exe
 
 # log
 log
+
+# vscode config
+.vscode

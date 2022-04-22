@@ -9,7 +9,7 @@ from nogo import get_legal_actions
 class Evaluator:
     """评估器，需要实现一个eval函数"""
 
-    def eval(self, board_A, board_B, legal_actions) -> tuple[np.ndarray, float]:
+    def eval(self, board_A, board_B, actions_A, actions_B) -> tuple[np.ndarray, float]:
         """输入棋盘，输出每个位置的p以及对当前局面的评价v"""
         return np.random.random((9, 9))+.01, .0
 
@@ -23,12 +23,19 @@ class NNEvaluator(Evaluator):
         super().__init__()
         self.model = model
 
-    def eval(self, board_A, board_B, legal_actions) -> tuple[np.ndarray, float]:
+    def eval(self, board_A, board_B, actions_A, actions_B) -> tuple[np.ndarray, float]:
         with torch.no_grad():
+            aa = torch.zeros((9, 9))
+            ab = torch.zeros((9, 9))
+            for x, y in actions_A:
+                aa[x][y] = 1
+            for x, y in actions_B:
+                ab[x][y] = 1
             board_A = torch.tensor(board_A, dtype=torch.float32)
             board_B = torch.tensor(board_B, dtype=torch.float32)
-            board = torch.unsqueeze(torch.stack([board_A, board_B]), 0)
-            p, v = self.model.forward(board)
+            board = torch.unsqueeze(torch.stack([board_A, board_B, aa, ab]), 0)
+            p, v = self.model.forward(board.cuda())
+            p, v = p.cpu(), v.cpu()
             p = p.reshape((9, 9))
             return np.array(p), float(v)
 
@@ -62,7 +69,7 @@ class _TreeNode:
         self.actions = action_A
         self.children = [None]*len(self.actions)
         self.p, self.v = evaluator.eval(
-            self.board_A, self.board_B, self.actions)
+            self.board_A, self.board_B, action_A, action_B)
 
 
 def _select_and_expand_and_evaluate(t: _TreeNode) -> _TreeNode:

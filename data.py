@@ -63,9 +63,13 @@ class GameDataSet(Dataset):
         if random() > 0.5:
             s[0] = torch.flipud(s[0])
             s[1] = torch.flipud(s[1])
+            s[2] = torch.flipud(s[2])
+            s[3] = torch.flipud(s[3])
             p = torch.flipud(p)
         if random() > 0.5:
             s[0] = torch.fliplr(s[0])
             s[1] = torch.fliplr(s[1])
+            s[2] = torch.fliplr(s[2])
+            s[3] = torch.fliplr(s[3])
             p = torch.fliplr(p)
         return s, p, z

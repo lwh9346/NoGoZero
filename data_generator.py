@@ -40,10 +40,10 @@ if __name__ == "__main__":
         tempreature = float(sys.argv[3])
         rand_seed = int(sys.argv[4])
     else:
-        model = "random"
-        games_to_play = 1
+        model = "model_1"
+        games_to_play = 10
         tempreature = 2.0
-        rand_seed = 22
+        rand_seed = 0
     # 初始化
     """
     try:
@@ -62,7 +62,7 @@ if __name__ == "__main__":
         mcts_fn = _random_mcts_cpp
     else:
         # load torch model
-        nn = torch.load("models/{}.pt".format(model)).cpu()
+        nn = torch.load("models/{}.pt".format(model)).cuda()
         mcts.evaluator = mcts.NNEvaluator(nn)
         mcts_fn = mcts.mcts
     memory_s = []
@@ -79,24 +79,34 @@ if __name__ == "__main__":
         res = 0
         ir = 0
         while True:
+            actions_A = nogo.get_legal_actions(board_A, board_B)
+            actions_B = nogo.get_legal_actions(board_B, board_A)
+            aa = np.zeros((9, 9))
+            ab = np.zeros((9, 9))
+            for x, y in actions_A:
+                aa[x][y] = 1
+            for x, y in actions_B:
+                ab[x][y] = 1
             if current_player == "A":
-                p_map = mcts_fn(board_A, board_B, 100)
+                p_map = mcts_fn(board_A, board_B, 400)
                 game_memory_p.append(p_map)
-                game_memory_s.append([deepcopy(board_A), deepcopy(board_B)])
+                game_memory_s.append(
+                    [deepcopy(board_A), deepcopy(board_B), aa, ab])
             else:
-                p_map = mcts_fn(board_B, board_A, 100)
+                p_map = mcts_fn(board_B, board_A, 400)
                 game_memory_p.append(p_map)
-                game_memory_s.append([deepcopy(board_B), deepcopy(board_A)])
-            legal_actions_A = len(nogo.get_legal_actions(board_A, board_B))
-            legal_actions_B = len(nogo.get_legal_actions(board_B, board_A))
-            if legal_actions_A == 0 or legal_actions_B == 0:
+                game_memory_s.append(
+                    [deepcopy(board_B), deepcopy(board_A), aa, ab])
+            num_actions_A = len(actions_A)
+            num_actions_B = len(actions_B)
+            if num_actions_A == 0 or num_actions_B == 0:
                 if current_player == "A":
-                    if legal_actions_A == 0:
+                    if num_actions_A == 0:
                         z = -1
                     else:
                         z = 1
                 else:
-                    if legal_actions_B == 0:
+                    if num_actions_B == 0:
                         z = 1
                     else:
                         z = -1

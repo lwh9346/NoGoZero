@@ -11,7 +11,7 @@ if __name__ == "__main__":
                 "python3 data_generator.py random 20 2.0 {}".format(i)])
             tasks.append(p)
             p.start()
-            time.sleep(1)
+            time.sleep(0.1)
         for p in tasks:
             p.join()
         j += NUM_WORKERS

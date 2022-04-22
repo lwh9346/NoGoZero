@@ -82,24 +82,33 @@ class NoGoNet(nn.Module):
     输出形状([B,9,9],[B])，其中前一个是9*9棋盘，另一个是v
     """
 
-    def __init__(self, blocks=4):
+    def __init__(self, scale=16):
         super().__init__()
-        self.preproccess = nn.Conv2d(2, 16, kernel_size=3, padding=1)
+        self.preproccess = nn.Sequential(
+            nn.Conv2d(4, scale*4, kernel_size=3, padding=1),
+            nn.LayerNorm((9, 9)),
+            nn.GELU(),
+        )
         blks = []
-        for _ in range(blocks):
-            blks.append(Block(16))
+        for _ in range(scale):
+            blks.append(Block(scale*4))
         self.blks = nn.Sequential(*blks)
         self.policy_head = nn.Sequential(
-            nn.Conv2d(16, 1, kernel_size=1)
+            nn.Conv2d(scale*4, 2, kernel_size=1),
+            nn.LayerNorm((9, 9)),
+            nn.GELU(),
+            nn.Flatten(),
+            nn.Linear(9*9*2, 9*9),
         )
         self.value_head = nn.Sequential(
-            nn.Conv2d(16, 1, kernel_size=1),
+            nn.Conv2d(scale*4, 1, kernel_size=1),
             nn.Flatten(),
-            nn.Linear(9*9*1, 16),
-            nn.Dropout(),
+            nn.LayerNorm((9*9*1)),
             nn.GELU(),
-            nn.Linear(16, 1),
-            nn.Tanh()
+            nn.Linear(9*9*1, scale*4),
+            nn.GELU(),
+            nn.Linear(scale*4, 1),
+            nn.Tanh(),
         )
 
     def forward(self, x):
@@ -114,8 +123,8 @@ class NoGoNet(nn.Module):
 
 
 if __name__ == "__main__":
-    a = torch.ones((1, 2, 9, 9))
-    m = NoGoNet()
+    a = torch.ones((1, 4, 9, 9))
+    m = NoGoNet(scale=4)
     p, v = m(a)
     torch.save(m, "models/test.pt")
     print(p)
