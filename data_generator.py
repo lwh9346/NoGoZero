@@ -13,7 +13,7 @@ from model import NoGoNet
 import nogo
 
 
-def _random_mcts_cpp(board_A, board_B, max_N):
+def random_mcts_cpp(board_A, board_B, max_N):
     # max_N参数被忽略，固定输出10000步的结果
     input_data = ["C"]*81
     for i in range(81):
@@ -59,7 +59,7 @@ if __name__ == "__main__":
     random.seed(rand_seed)
     if model == "random":
         # use random mcts
-        mcts_fn = _random_mcts_cpp
+        mcts_fn = random_mcts_cpp
     else:
         # load torch model
         nn = torch.load("models/{}.pt".format(model)).cuda()
