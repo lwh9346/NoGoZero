@@ -1,4 +1,6 @@
+from copy import deepcopy
 import numpy as np
+import torch
 
 _cxy = [(-1, 0), (0, -1), (1, 0), (0, 1)]
 _points = [(i//9, i % 9) for i in range(81)]
@@ -62,7 +64,7 @@ def get_legal_actions(board_A, board_B) -> list:
     return result
 
 
-def get_legal_actions_AB(board_A, board_B) -> tuple(list, list):
+def get_legal_actions_AB(board_A, board_B) -> tuple[list, list]:
     """
     返回A和B玩家可落子点集
     board_A/board_B:9*9棋盘，1代表有子，0代表无子
@@ -181,10 +183,16 @@ def _in_board(x, y):
     return x >= 0 and x < 9 and y >= 0 and y < 9
 
 
+class Action(tuple[int, int]):
+    pass
+
+
 class Status():
     def __init__(self, board_A=None, board_B=None, action=None) -> None:
-        self.board_A = np.zeros((9, 9)) if board_A is None else board_A
-        self.board_B = np.zeros((9, 9)) if board_B is None else board_B
+        self.board_A = torch.zeros(
+            (9, 9)) if board_A is None else board_A.clone()
+        self.board_B = torch.zeros(
+            (9, 9)) if board_B is None else board_B.clone()
         if not action is None:
             self.board_B[action[0]][action[1]] = 1
         self.actions_A, self.actions_B = get_legal_actions_AB(board_A, board_B)
@@ -193,8 +201,19 @@ class Status():
         self.win = False if not self.terminate else len(self.actions_A) != 0
         # 如果终局的话当前方是否获胜
 
-    def get_next_status(self, action):
+    def next_status(self, action: Action):
         return Status(self.board_B, self.board_A, action)
+
+    def tensor(self) -> torch.Tensor:
+        ba = self.board_A
+        bb = self.board_B
+        aa = torch.zeros((9, 9))
+        ab = torch.zeros((9, 9))
+        for x, y in self.actions_A:
+            aa[x][y] = 1.
+        for x, y in self.actions_B:
+            ab[x][y] = 1.
+        return torch.stack((ba, bb, aa, ab))
 
 
 if __name__ == "__main__":
@@ -218,4 +237,4 @@ if __name__ == "__main__":
         [1., 0., 0., 0., 0., 1., 1., 1., 0.],
         [1., 0., 1., 1., 0., 1., 1., 0., 1.],
         [0., 0., 1., 1., 1., 0., 0., 1., 1.]]
-    print(get_legal_actions(board_A, board_B))
+    print(get_legal_actions_AB(board_A, board_B))

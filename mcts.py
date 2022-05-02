@@ -1,124 +1,157 @@
-from math import log
-import numpy as np
 import torch
-from model import NoGoNet
+import numpy as np
 
-from nogo import get_legal_actions
+from math import log, sqrt
+import multiprocessing as mp
+from queue import Queue
+
+from nogo import Status, Action
+from model import NoGoNet
 
 
 class Evaluator:
-    """评估器，需要实现一个eval函数"""
+    """
+    评估器，需要实现两个eval函数
+    输入的评估状态和输出遵循FIFO的原则
+    """
 
-    def eval(self, board_A, board_B, actions_A, actions_B) -> tuple[np.ndarray, float]:
-        """输入棋盘，输出每个位置的p以及对当前局面的评价v"""
-        return np.random.random((9, 9))+.01, .0
+    def start_eval(self, s: Status) -> None:
+        """输入状态s，输出每个位置的p以及对当前局面的评价v"""
+        pass
+
+    def get_eval_result(self) -> tuple[torch.Tensor, float]:
+        """输入状态s，输出每个位置的p以及对当前局面的评价v"""
+        p, v = torch.rand((9, 9)), 0.0
+        p /= torch.sum(p)
+        return p, v
 
 
-evaluator = Evaluator()  # 神经网络，或者什么类似的东西，用于指导MCTS
-c_puct = 0.5
-
-
-class NNEvaluator(Evaluator):
-    def __init__(self, model: NoGoNet) -> None:
+class BasicNNEvaluator(Evaluator):
+    def __init__(self, model: NoGoNet, device="cpu") -> None:
         super().__init__()
-        self.model = model
+        self.device = device
+        self.model = model.to(device)
+        self._eval_queue = []
+        self._results = Queue()
 
-    def eval(self, board_A, board_B, actions_A, actions_B) -> tuple[np.ndarray, float]:
-        with torch.no_grad():
-            aa = torch.zeros((9, 9))
-            ab = torch.zeros((9, 9))
-            for x, y in actions_A:
-                aa[x][y] = 1
-            for x, y in actions_B:
-                ab[x][y] = 1
-            board_A = torch.tensor(board_A, dtype=torch.float32)
-            board_B = torch.tensor(board_B, dtype=torch.float32)
-            board = torch.unsqueeze(torch.stack([board_A, board_B, aa, ab]), 0)
-            p, v = self.model.forward(board.cuda())
-            p, v = p.cpu(), v.cpu()
-            p = p.reshape((9, 9))
-            return np.array(p), float(v)
+    def start_eval(self, s: Status) -> None:
+        self._eval_queue.append(s.tensor())
+
+    @torch.no_grad()
+    @torch.cuda.amp.autocast_mode.autocast()
+    def get_eval_result(self) -> tuple[torch.Tensor, float]:
+        if not self._results.empty():
+            return self._results.get()
+        self.model.to(self.device)
+        ps, vs = self.model(torch.stack(self._eval_queue).to(self.device))
+        ps, vs = ps.cpu(), vs.cpu()
+        self._eval_queue = []
+        for i in range(len(ps)):
+            self._results.put((ps[i], float(vs[i])))
+        return self._results.get()
+
+
+class MultiProcessNNEvaluator(Evaluator):
+    def __init__(self, evalQ: mp.Queue, resQ: mp.Queue, idx: int) -> None:
+        self._idx = idx
+        self._eval_queue = evalQ
+        self._results = resQ
+
+    def start_eval(self, s: Status) -> None:
+        self._eval_queue.put((s.tensor(), self._idx))
+
+    def get_eval_result(self) -> tuple[torch.Tensor, float]:
+        return self._results.get()
+
+
+class MultiProcessNNEvaluatorGroup():
+    @staticmethod
+    @torch.no_grad()
+    @torch.cuda.amp.autocast_mode.autocast()
+    def _work_no_stop(evalQ: mp.Queue, resQ: list[mp.Queue], batch_size: int, model: NoGoNet):
+        while True:
+            e, idx = [], []
+            for _ in range(batch_size):
+                s, i = evalQ.get()
+                e.append(s)
+                idx.append(i)
+            e = torch.stack(e).cuda()
+            ps, vs = model(e)
+            ps, vs = ps.cpu(), vs.cpu()
+            for i in range(batch_size):
+                resQ[idx[i]].put(ps[i], float(vs[i]))
+
+    def __init__(self, model: NoGoNet, num_evaluator: int, batch_size=16) -> None:
+        self._evalQ = mp.Queue()
+        self._resQ = [mp.Queue() for _ in range(num_evaluator)]
+        self.evaluators = [MultiProcessNNEvaluator(
+            self._evalQ, self._resQ[i]) for i in range(num_evaluator)]
+        self._worker = mp.Process(target=MultiProcessNNEvaluatorGroup._work_no_stop,
+                                  args=[self._evalQ, self._resQ, batch_size, model])
+        self._worker.start()
 
 
 class _TreeNode:
-    """包含了W、N、父子结点以及评估结果"""
+    """包含了W、N、父子结点"""
 
-    def __init__(self, parent, action, board_A=None, board_B=None) -> None:
+    def __init__(self, parent, s: Status) -> None:
+        self.s = s
         self.parent = parent
-        self.w = .0
+        self.is_leaf = True
+        self.w = .0  # 当前玩家视角
         self.n = 0
-        if parent is None:
-            self.board_A = board_A
-            self.board_B = board_B
-        else:
-            self.board_A = np.copy(parent.board_B)
-            self.board_B = np.copy(parent.board_A)
-            x, y = action
-            self.board_B[x][y] = 1
-        action_A = get_legal_actions(self.board_A, self.board_B)
-        action_B = get_legal_actions(self.board_B, self.board_A)
-        if len(action_B) == 0 or len(action_A) == 0:
-            if len(action_A) == 0:
-                self.v = -1
+
+
+class MonteCarolTree:
+    def __init__(self, s: Status, max_steps: int, evaluator: Evaluator, c_puct=1.1) -> None:
+        assert not s.terminate
+        self._root = _TreeNode(None, s)
+        self._evaluator = evaluator
+        self._max_steps = max_steps
+        self._c_puct = c_puct
+
+    def search(self) -> None:
+        for _ in range(self._max_steps):
+            # select
+            t = self._root
+            while not t.is_leaf:
+                # PUCT
+                i = np.argmax([-t.w/t.n+self._c_puct*t.p[i]*sqrt(t.n) /
+                               (1+t.children[i].n) for i in range(len(t.children))])
+                t = t.children[i]
+            # expand and evaluate
+            if not t.s.terminate:
+                t.is_leaf = False
+                t.children = [_TreeNode(t, t.s.next_status(a))
+                              for a in t.s.actions]
+                self._evaluator.start_eval(t.s.tensor())
+                p, v = self._evaluator.get_eval_result()
+                t.p = [p[x][y] for x, y in t.s.actions]
             else:
-                self.v = 1
-            self.actions = []
-            self.children = []
-            self.p = np.zeros((9, 9))
-            return
-        self.actions = action_A
-        self.children = [None]*len(self.actions)
-        self.p, self.v = evaluator.eval(
-            self.board_A, self.board_B, action_A, action_B)
+                v = 1. if t.s.win else -1.
+            # backup
+            while t is not None:
+                t.w += v
+                t.n += 1
+                v = -v
+                t = t.parent
+        self._nmap = torch.zeros((9, 9))
+        for i, (x, y) in enumerate(self._root.s.actions):
+            self._nmap[x][y] = self._root.children[i].n
 
+    def get_action(self, tempreature=1.0) -> Action:
+        w = torch.reshape(self._nmap, (81,))
+        u = torch.rand((81,))
+        k = u**(tempreature/w)
+        a = int(np.argmax(k))
+        return a//9, a % 9
 
-def _select_and_expand_and_evaluate(t: _TreeNode) -> _TreeNode:
-    if len(t.actions) == 0:
-        return t
-    log_N = log(t.n)
-    max_qu = -2.
-    max_arg = 0
-    for i in range(len(t.children)):
-        c = t.children[i]
-        x, y = t.actions[i]
-        n = c.n if c is not None else 0
-        q = -c.w/n if c is not None else 0  # w代表了子节点的v总和，代表对对手的有利程度，这边需要反过来
-        qu = q+c_puct*t.p[x][y]*log_N/(1.+n)
-        if qu > max_qu:
-            max_qu = qu
-            max_arg = i
-    if t.children[max_arg] is None:
-        nt = _TreeNode(t, t.actions[max_arg])
-        t.children[max_arg] = nt
-        return nt
-    return _select_and_expand_and_evaluate(t.children[max_arg])
-
-
-def _backup(t: _TreeNode) -> None:
-    v = t.v
-    while t is not None:
-        t.w += v
-        t.n += 1
-        v *= -1  # 交换
-        t = t.parent
-
-
-def mcts(board_A, board_B, max_N) -> np.ndarray:
-    """输入棋盘以及最大搜索次数，给出每个位置被访问次数"""
-    root = _TreeNode(None, None, board_A, board_B)
-    _backup(root)
-    for _ in range(max_N):
-        t = _select_and_expand_and_evaluate(root)
-        _backup(t)
-    result = np.zeros((9, 9))
-    for i in range(len(root.children)):
-        x, y = root.actions[i]
-        result[x][y] = root.children[i].n if root.children[i] is not None else 0
-    return result
+    def get_nmap(self) -> torch.Tensor:
+        return torch.reshape(self._nmap, (9, 9))
 
 
 if __name__ == "__main__":
-    board_A = np.array(
+    board_A = torch.tensor(
         [
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -131,7 +164,7 @@ if __name__ == "__main__":
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
         ]
     )
-    board_B = np.array(
+    board_B = torch.tensor(
         [
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -144,4 +177,10 @@ if __name__ == "__main__":
             [0, 0, 1, 1, 1, 0, 0, 0, 0],
         ]
     )
-    print(mcts(board_A, board_B, 1000))
+    s = Status(board_A, board_B)
+    e = Evaluator()
+    mct = MonteCarolTree(s, 10, e)
+    import cProfile
+    print(cProfile.run("mct.search()"))
+    print(mct.get_nmap())
+    print(mct.get_action())
