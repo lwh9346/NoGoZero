@@ -193,7 +193,7 @@ class Status():
             (9, 9)) if board_A is None else board_A.clone()
         self.board_B = torch.zeros(
             (9, 9)) if board_B is None else board_B.clone()
-        if not action is None:
+        if action is not None:
             self.board_B[action[0]][action[1]] = 1
         self.actions_A, self.actions_B = get_legal_actions_AB(board_A, board_B)
         self.actions = self.actions_A
