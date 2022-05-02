@@ -141,3 +141,7 @@ log
 
 # vscode config
 .vscode
+
+# dynamic link lib
+*.dll
+*.so

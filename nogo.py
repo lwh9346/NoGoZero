@@ -1,186 +1,38 @@
-from copy import deepcopy
+from platform import system
+from ctypes import CDLL, c_char_p, Structure, c_int32, byref, c_uint8
 import numpy as np
 import torch
 
-_cxy = [(-1, 0), (0, -1), (1, 0), (0, 1)]
-_points = [(i//9, i % 9) for i in range(81)]
+if system() == "Windows":
+    nogo_lib = CDLL("./nogo.dll")
+elif system() == "Linux":
+    nogo_lib = CDLL("./nogo.so")
+else:
+    raise Exception("不受支持的操作系统")
+_c_get_legal_actions = nogo_lib.get_legal_actions
 
 
-def get_legal_actions(board_A, board_B) -> list:
-    """
-    返回A玩家可落子点集
-    board_A/board_B:9*9棋盘，1代表有子，0代表无子
-    """
-    sole_airs_B = set()
-    sole_airs_A = set()
-    not_sole_airs_A = set()
-    visited = set()
-    for x, y in _points:
-        if (x, y) in visited:
-            continue
-        if board_A[x][y]:
-            members, airs = _bfs_group(board_A, board_B, x, y)
-            for m in members:
-                visited.add(m)
-            for a in airs:
-                if len(airs) == 1:
-                    sole_airs_A.add(a)
-                else:
-                    not_sole_airs_A.add(a)
-        if board_B[x][y]:
-            members, airs = _bfs_group(board_B, board_A, x, y)
-            for m in members:
-                visited.add(m)
-            if len(airs) == 1:
-                for a in airs:
-                    sole_airs_B.add(a)
-    result = []
-    for p in _points:
-        if p in visited:
-            continue
-        if p in sole_airs_B:
-            continue
-        if p in not_sole_airs_A:
-            result.append(p)
-            continue
-        if p in sole_airs_A:
-            x, y = p
-            for dx, dy in _cxy:
-                fx, fy = x+dx, y+dy
-                if not _in_board(fx, fy):
-                    continue
-                if board_A[fx][fy] == 0 and board_B[fx][fy] == 0:
-                    result.append((x, y))
-                    break
-            continue
-        x, y = p
-        not_dead_point = False
-        for dx, dy in _cxy:
-            fx, fy = x+dx, y+dy
-            if _in_board(fx, fy) and board_A[fx][fy] == 0 and board_B[fx][fy] == 0:
-                not_dead_point = True
-        if not_dead_point:
-            result.append(p)
-    return result
+class _LegalActionResult(Structure):
+    _fields_ = [
+        ("num_s", c_int32),
+        ("num_r", c_int32),
+        ("res_s", c_uint8*81),
+        ("res_r", c_uint8*81),
+    ]
 
 
-def get_legal_actions_AB(board_A, board_B) -> tuple[list, list]:
+def get_legal_actions(board_A: torch.Tensor, board_B: torch.Tensor) -> tuple[list, list]:
     """
     返回A和B玩家可落子点集
     board_A/board_B:9*9棋盘，1代表有子，0代表无子
     """
-    sole_airs_A = set()
-    sole_airs_B = set()
-    not_sole_airs_A = set()
-    not_sole_airs_B = set()
-    visited = set()
-    for x, y in _points:
-        if (x, y) in visited:
-            continue
-        if board_A[x][y]:
-            members, airs = _bfs_group(board_A, board_B, x, y)
-            for m in members:
-                visited.add(m)
-            for a in airs:
-                if len(airs) == 1:
-                    sole_airs_A.add(a)
-                else:
-                    not_sole_airs_A.add(a)
-        if board_B[x][y]:
-            members, airs = _bfs_group(board_B, board_A, x, y)
-            for m in members:
-                visited.add(m)
-            for a in airs:
-                if len(airs) == 1:
-                    sole_airs_B.add(a)
-                else:
-                    not_sole_airs_B.add(a)
-    result_A = []
-    for p in _points:
-        if p in visited:
-            continue
-        if p in sole_airs_B:
-            continue
-        if p in not_sole_airs_A:
-            result_A.append(p)
-            continue
-        if p in sole_airs_A:
-            x, y = p
-            for dx, dy in _cxy:
-                fx, fy = x+dx, y+dy
-                if not _in_board(fx, fy):
-                    continue
-                if board_A[fx][fy] == 0 and board_B[fx][fy] == 0:
-                    result_A.append((x, y))
-                    break
-            continue
-        x, y = p
-        not_dead_point = False
-        for dx, dy in _cxy:
-            fx, fy = x+dx, y+dy
-            if _in_board(fx, fy) and board_A[fx][fy] == 0 and board_B[fx][fy] == 0:
-                not_dead_point = True
-        if not_dead_point:
-            result_A.append(p)
-    result_B = []
-    for p in _points:
-        if p in visited:
-            continue
-        if p in sole_airs_A:
-            continue
-        if p in not_sole_airs_B:
-            result_B.append(p)
-            continue
-        if p in sole_airs_B:
-            x, y = p
-            for dx, dy in _cxy:
-                fx, fy = x+dx, y+dy
-                if not _in_board(fx, fy):
-                    continue
-                if board_B[fx][fy] == 0 and board_A[fx][fy] == 0:
-                    result_B.append((x, y))
-                    break
-            continue
-        x, y = p
-        not_dead_point = False
-        for dx, dy in _cxy:
-            fx, fy = x+dx, y+dy
-            if _in_board(fx, fy) and board_B[fx][fy] == 0 and board_A[fx][fy] == 0:
-                not_dead_point = True
-        if not_dead_point:
-            result_B.append(p)
-    return result_A, result_B
-
-
-def _bfs_group(board_A, board_B, x0, y0):
-    airs = set()
-    visited = set()
-    to_visit = [(x0, y0)]
-    i = 0
-    while i < len(to_visit):
-        x, y = to_visit[i]
-        i += 1
-        if (x, y) in visited:
-            continue
-        visited.add((x, y))
-        for dx, dy in _cxy:
-            fx, fy = x+dx, y+dy
-            if not _in_board(fx, fy):
-                continue
-            if board_A[fx][fy] and not (fx, fy) in visited:
-                to_visit.append((fx, fy))
-    for x, y in visited:
-        for dx, dy in _cxy:
-            fx, fy = x+dx, y+dy
-            if not _in_board(fx, fy):
-                continue
-            if board_A[fx][fy] == 0 and board_B[fx][fy] == 0:
-                airs.add((fx, fy))
-    return visited, airs
-
-
-def _in_board(x, y):
-    return x >= 0 and x < 9 and y >= 0 and y < 9
+    b = (board_A-board_B).numpy()
+    b = b.astype(np.int8).ctypes.data_as(c_char_p)
+    res = _LegalActionResult()
+    _c_get_legal_actions(b, byref(res))
+    res_a = [(res.res_s[i]//9, res.res_s[i] % 9) for i in range(res.num_s)]
+    res_b = [(res.res_r[i]//9, res.res_r[i] % 9) for i in range(res.num_r)]
+    return res_a, res_b
 
 
 class Action(tuple[int, int]):
@@ -195,7 +47,7 @@ class Status():
             (9, 9)) if board_B is None else board_B.clone()
         if action is not None:
             self.board_B[action[0]][action[1]] = 1
-        self.actions_A, self.actions_B = get_legal_actions_AB(board_A, board_B)
+        self.actions_A, self.actions_B = get_legal_actions(board_A, board_B)
         self.actions = self.actions_A
         self.terminate = len(self.actions_A) == 0 or len(self.actions_B) == 0
         self.win = False if not self.terminate else len(self.actions_A) != 0
@@ -205,19 +57,11 @@ class Status():
         return Status(self.board_B, self.board_A, action)
 
     def tensor(self) -> torch.Tensor:
-        ba = self.board_A
-        bb = self.board_B
-        aa = torch.zeros((9, 9))
-        ab = torch.zeros((9, 9))
-        for x, y in self.actions_A:
-            aa[x][y] = 1.
-        for x, y in self.actions_B:
-            ab[x][y] = 1.
-        return torch.stack((ba, bb, aa, ab))
+        return torch.stack((self.board_A, self.board_B))
 
 
 if __name__ == "__main__":
-    board_A = [
+    board_A = torch.Tensor([
         [1., 1., 0., 0., 1., 1., 1., 0., 0.],
         [1., 1., 1., 1., 0., 0., 0., 0., 0.],
         [0., 1., 1., 0., 0., 1., 0., 0., 0.],
@@ -226,8 +70,8 @@ if __name__ == "__main__":
         [0., 0., 1., 0., 0., 1., 1., 0., 0.],
         [0., 1., 1., 1., 1., 0., 0., 0., 0.],
         [0., 1., 0., 0., 1., 0., 0., 0., 0.],
-        [1., 1., 0., 0., 0., 0., 1., 0., 0.]]
-    board_B = [
+        [1., 1., 0., 0., 0., 0., 1., 0., 0.]])
+    board_B = torch.Tensor([
         [0., 0., 1., 0., 0., 0., 0., 1., 0.],
         [0., 0., 0., 0., 0., 1., 1., 0., 1.],
         [1., 0., 0., 1., 1., 0., 1., 1., 1.],
@@ -236,5 +80,5 @@ if __name__ == "__main__":
         [1., 0., 0., 1., 0., 0., 0., 0., 1.],
         [1., 0., 0., 0., 0., 1., 1., 1., 0.],
         [1., 0., 1., 1., 0., 1., 1., 0., 1.],
-        [0., 0., 1., 1., 1., 0., 0., 1., 1.]]
-    print(get_legal_actions_AB(board_A, board_B))
+        [0., 0., 1., 1., 1., 0., 0., 1., 1.]])
+    print(get_legal_actions(board_A, board_B))

@@ -110,15 +110,14 @@ class _TreeNode:
 
 
 class MonteCarolTree:
-    def __init__(self, s: Status, max_steps: int, evaluator: Evaluator, c_puct=1.1) -> None:
+    def __init__(self, s: Status, evaluator: Evaluator, c_puct=1.1) -> None:
         assert not s.terminate
         self._root = _TreeNode(None, s, None)
         self._evaluator = evaluator
-        self._max_steps = max_steps
         self._c_puct = c_puct
 
-    def search(self) -> None:
-        for _ in range(self._max_steps):
+    def search(self, max_steps: int) -> None:
+        for _ in range(max_steps):
             # select
             t = self._root
             while not t.is_leaf:
@@ -132,7 +131,8 @@ class MonteCarolTree:
                 t.children = [_TreeNode(t, None, a) for a in t.s.actions]
                 self._evaluator.start_eval(t.s.tensor())
                 p, v = self._evaluator.get_eval_result()
-                t.p = [p[x][y] for x, y in t.s.actions]
+                v = float(v)
+                t.p = [float(p[x][y]) for x, y in t.s.actions]
             else:
                 v = 1. if t.s.win else -1.
             # backup
@@ -185,8 +185,8 @@ if __name__ == "__main__":
     )
     s = Status(board_A, board_B)
     e = Evaluator()
-    mct = MonteCarolTree(s, 500, e)
+    mct = MonteCarolTree(s, e)
     import cProfile
-    print(cProfile.run("mct.search()"))
+    print(cProfile.run("mct.search(800)"))
     print(mct.get_nmap())
     print(mct.get_action())
