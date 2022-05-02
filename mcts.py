@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from math import log, sqrt
+from math import sqrt
 import multiprocessing as mp
 from queue import Queue
 
@@ -69,6 +69,7 @@ class MultiProcessNNEvaluatorGroup():
     @torch.no_grad()
     @torch.cuda.amp.autocast_mode.autocast()
     def _work_no_stop(evalQ: mp.Queue, resQ: list[mp.Queue], batch_size: int, model: NoGoNet):
+        model = model.cuda()
         while True:
             e, idx = [], []
             for _ in range(batch_size):
@@ -79,13 +80,14 @@ class MultiProcessNNEvaluatorGroup():
             ps, vs = model(e)
             ps, vs = ps.cpu(), vs.cpu()
             for i in range(batch_size):
-                resQ[idx[i]].put(ps[i], float(vs[i]))
+                resQ[idx[i]].put((ps[i], float(vs[i])))
 
     def __init__(self, model: NoGoNet, num_evaluator: int, batch_size=16) -> None:
         self._evalQ = mp.Queue()
         self._resQ = [mp.Queue() for _ in range(num_evaluator)]
         self.evaluators = [MultiProcessNNEvaluator(
-            self._evalQ, self._resQ[i]) for i in range(num_evaluator)]
+            self._evalQ, self._resQ[i], i) for i in range(num_evaluator)]
+        model = model.cpu()  # 不在cpu上的话复制过去会变成全0网络，等会再复制到cuda
         self._worker = mp.Process(target=MultiProcessNNEvaluatorGroup._work_no_stop,
                                   args=[self._evalQ, self._resQ, batch_size, model])
         self._worker.start()
@@ -129,7 +131,7 @@ class MonteCarolTree:
             if not t.s.terminate:
                 t.is_leaf = False
                 t.children = [_TreeNode(t, None, a) for a in t.s.actions]
-                self._evaluator.start_eval(t.s.tensor())
+                self._evaluator.start_eval(t.s)
                 p, v = self._evaluator.get_eval_result()
                 v = float(v)
                 t.p = [float(p[x][y]) for x, y in t.s.actions]
@@ -184,9 +186,13 @@ if __name__ == "__main__":
         ]
     )
     s = Status(board_A, board_B)
-    e = Evaluator()
-    mct = MonteCarolTree(s, e)
+    eg = MultiProcessNNEvaluatorGroup(NoGoNet(), 2, 2)
+    e1 = eg.evaluators[0]
+    e2 = eg.evaluators[1]
+    mct1 = MonteCarolTree(s, e1)
+    mct2 = MonteCarolTree(s, e2)
     import cProfile
-    print(cProfile.run("mct.search(800)"))
-    print(mct.get_nmap())
-    print(mct.get_action())
+    mp.Process(target=mct2.search, args=[800]).start()
+    print(cProfile.run("mct1.search(800)"))
+    print(mct1.get_nmap())
+    print(mct1.get_action())

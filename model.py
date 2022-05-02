@@ -85,7 +85,7 @@ class NoGoNet(nn.Module):
     def __init__(self, scale=16):
         super().__init__()
         self.preproccess = nn.Sequential(
-            nn.Conv2d(4, scale*4, kernel_size=3, padding=1),
+            nn.Conv2d(2, scale*4, kernel_size=3, padding=1),
             nn.LayerNorm((9, 9)),
             nn.GELU(),
         )
@@ -117,13 +117,13 @@ class NoGoNet(nn.Module):
         x = self.blks(x)
         a = self.policy_head(x)
         a = torch.reshape(a, (n, 81))
-        a = F.softmax(a, 1)
+        a = F.softmax(a, 1).reshape((n, 9, 9))
         b = self.value_head(x)
         return a, b
 
 
 if __name__ == "__main__":
-    a = torch.ones((1, 4, 9, 9))
+    a = torch.ones((1, 2, 9, 9))
     m = NoGoNet(scale=4)
     p, v = m(a)
     torch.save(m, "models/test.pt")

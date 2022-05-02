@@ -57,7 +57,7 @@ class Status():
         return Status(self.board_B, self.board_A, action)
 
     def tensor(self) -> torch.Tensor:
-        return torch.stack((self.board_A, self.board_B))
+        return torch.stack((self.board_A, self.board_B)).float()
 
 
 if __name__ == "__main__":
