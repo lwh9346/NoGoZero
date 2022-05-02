@@ -94,18 +94,25 @@ class MultiProcessNNEvaluatorGroup():
 class _TreeNode:
     """包含了W、N、父子结点"""
 
-    def __init__(self, parent, s: Status) -> None:
-        self.s = s
+    def __init__(self, parent, s: Status, a: Action) -> None:
+        self._s = s
+        self.a = a
         self.parent = parent
         self.is_leaf = True
         self.w = .0  # 当前玩家视角
         self.n = 0
 
+    @property
+    def s(self) -> Status:
+        if self._s is None:
+            self._s = self.parent.s.next_status(self.a)
+        return self._s
+
 
 class MonteCarolTree:
     def __init__(self, s: Status, max_steps: int, evaluator: Evaluator, c_puct=1.1) -> None:
         assert not s.terminate
-        self._root = _TreeNode(None, s)
+        self._root = _TreeNode(None, s, None)
         self._evaluator = evaluator
         self._max_steps = max_steps
         self._c_puct = c_puct
@@ -122,8 +129,7 @@ class MonteCarolTree:
             # expand and evaluate
             if not t.s.terminate:
                 t.is_leaf = False
-                t.children = [_TreeNode(t, t.s.next_status(a))
-                              for a in t.s.actions]
+                t.children = [_TreeNode(t, None, a) for a in t.s.actions]
                 self._evaluator.start_eval(t.s.tensor())
                 p, v = self._evaluator.get_eval_result()
                 t.p = [p[x][y] for x, y in t.s.actions]
@@ -179,7 +185,7 @@ if __name__ == "__main__":
     )
     s = Status(board_A, board_B)
     e = Evaluator()
-    mct = MonteCarolTree(s, 10, e)
+    mct = MonteCarolTree(s, 500, e)
     import cProfile
     print(cProfile.run("mct.search()"))
     print(mct.get_nmap())
