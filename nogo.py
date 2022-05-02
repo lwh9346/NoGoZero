@@ -47,7 +47,8 @@ class Status():
             (9, 9)) if board_B is None else board_B.clone()
         if action is not None:
             self.board_B[action[0]][action[1]] = 1
-        self.actions_A, self.actions_B = get_legal_actions(board_A, board_B)
+        self.actions_A, self.actions_B = get_legal_actions(
+            self.board_A, self.board_B)
         self.actions = self.actions_A
         self.terminate = len(self.actions_A) == 0 or len(self.actions_B) == 0
         self.win = False if not self.terminate else len(self.actions_A) != 0
@@ -61,6 +62,7 @@ class Status():
 
 
 if __name__ == "__main__":
+    print(Status())
     board_A = torch.Tensor([
         [1., 1., 0., 0., 1., 1., 1., 0., 0.],
         [1., 1., 1., 1., 0., 0., 0., 0., 0.],
