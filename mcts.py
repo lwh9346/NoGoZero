@@ -73,16 +73,22 @@ class MultiProcessNNEvaluatorGroup():
         while True:
             e, idx = [], []
             for _ in range(batch_size):
-                s, i = evalQ.get()
+                try:
+                    s, i = evalQ.get(timeout=0.1)
+                except Exception:
+                    break
                 e.append(s)
                 idx.append(i)
+            if len(idx) == 0:
+                continue
             e = torch.stack(e).cuda()
             ps, vs = model(e)
             ps, vs = ps.cpu(), vs.cpu()
-            for i in range(batch_size):
+            for i in range(len(idx)):
                 resQ[idx[i]].put((ps[i], float(vs[i])))
 
     def __init__(self, model: NoGoNet, num_evaluator: int, batch_size=16, num_gpu_worker=4) -> None:
+        num_gpu_worker = min(num_gpu_worker, batch_size)
         self._evalQ = mp.Queue()
         self._resQ = [mp.Queue() for _ in range(num_evaluator)]
         self.evaluators = [MultiProcessNNEvaluator(
@@ -104,6 +110,7 @@ class _TreeNode:
         self.is_leaf = True
         self.w = .0  # 当前玩家视角
         self.n = 0
+        self.o = 0
 
     @property
     def s(self) -> Status:
@@ -119,31 +126,43 @@ class MonteCarolTree:
         self._evaluator = evaluator
         self._c_puct = c_puct
 
-    def search(self, max_steps: int) -> None:
-        for _ in range(max_steps):
-            # select
-            t = self._root
-            while not t.is_leaf:
-                # PUCT
-                i = np.argmax([-t.w/t.n+self._c_puct*t.p[i]*sqrt(t.n) /
-                               (1+t.children[i].n) for i in range(len(t.children))])
-                t = t.children[i]
-            # expand and evaluate
-            if not t.s.terminate:
-                t.is_leaf = False
-                t.children = [_TreeNode(t, None, a) for a in t.s.actions]
-                self._evaluator.start_eval(t.s)
-                p, v = self._evaluator.get_eval_result()
-                v = float(v)
-                t.p = [float(p[x][y]) for x, y in t.s.actions]
-            else:
-                v = 1. if t.s.win else -1.
-            # backup
-            while t is not None:
-                t.w += v
-                t.n += 1
-                v = -v
-                t = t.parent
+    def search(self, max_steps: int, mini_batch_size=8) -> None:
+        for _ in range(max_steps//mini_batch_size):
+            mini_batch = [None]*mini_batch_size
+            for j in range(mini_batch_size):
+                # select
+                t = self._root
+                while not t.is_leaf:
+                    # PUCT-P
+                    i = np.argmax([-t.w/t.n+self._c_puct*t.p[i]*sqrt(t.n+t.o) /
+                                   (1+t.children[i].n+t.children[i].o) for i in range(len(t.children))])
+                    t = t.children[i]
+                # add to mini batch
+                if not t.s.terminate:
+                    self._evaluator.start_eval(t.s)
+                mini_batch[j] = t
+                # backup O
+                while t is not None:
+                    t.o += 1
+                    t = t.parent
+            for i in range(mini_batch_size):
+                # get eval result
+                t = mini_batch[i]
+                if not t.s.terminate:
+                    t.is_leaf = False
+                    t.children = [_TreeNode(t, None, a) for a in t.s.actions]
+                    p, v = self._evaluator.get_eval_result()
+                    if not hasattr(t, "p"):
+                        t.p = [float(p[x][y]) for x, y in t.s.actions]
+                else:
+                    v = 1. if t.s.win else -1.
+                # backup N
+                while t is not None:
+                    t.o -= 1
+                    t.w += v
+                    t.n += 1
+                    v = -v
+                    t = t.parent
         self._nmap = torch.zeros((9, 9))
         for i, (x, y) in enumerate(self._root.s.actions):
             self._nmap[x][y] = self._root.children[i].n
