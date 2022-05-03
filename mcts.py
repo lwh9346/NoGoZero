@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from math import sqrt
-import multiprocessing as mp
+import torch.multiprocessing as mp
 from queue import Queue
 
 from nogo import Status, Action
@@ -82,15 +82,16 @@ class MultiProcessNNEvaluatorGroup():
             for i in range(batch_size):
                 resQ[idx[i]].put((ps[i], float(vs[i])))
 
-    def __init__(self, model: NoGoNet, num_evaluator: int, batch_size=16) -> None:
+    def __init__(self, model: NoGoNet, num_evaluator: int, batch_size=16, num_gpu_worker=4) -> None:
         self._evalQ = mp.Queue()
         self._resQ = [mp.Queue() for _ in range(num_evaluator)]
         self.evaluators = [MultiProcessNNEvaluator(
             self._evalQ, self._resQ[i], i) for i in range(num_evaluator)]
         model = model.cpu()  # 不在cpu上的话复制过去会变成全0网络，等会再复制到cuda
-        self._worker = mp.Process(target=MultiProcessNNEvaluatorGroup._work_no_stop,
-                                  args=[self._evalQ, self._resQ, batch_size, model])
-        self._worker.start()
+        self._workers = [mp.Process(target=MultiProcessNNEvaluatorGroup._work_no_stop,
+                                    args=[self._evalQ, self._resQ, batch_size//num_gpu_worker, model]) for _ in range(num_gpu_worker)]
+        for w in self._workers:
+            w.start()
 
 
 class _TreeNode:
