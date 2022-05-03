@@ -15,7 +15,7 @@ def _play(evaluator: MultiProcessNNEvaluator, plays: int, resQ: Queue, idx: int,
         while not s.terminate:
             deep_search = random() < 0.25
             mct = MonteCarolTree(s, evaluator)
-            mct.search(600 if deep_search else 100)
+            mct.search(160 if deep_search else 32)
             a = mct.get_action(tempreature)
             mem_s.append(s.tensor().clone() if deep_search else None)
             mem_p.append(mct.get_nmap().clone() if deep_search else None)
@@ -34,7 +34,9 @@ def _play(evaluator: MultiProcessNNEvaluator, plays: int, resQ: Queue, idx: int,
             resQ.put((mem_s[i], mem_p[i], mem_z[i]))
 
 
-def self_play(model: NoGoNet, num_workers=16, batch_size=4, total_play=64, tempreature=1.0):
+def self_play(model: NoGoNet, save_to: str, num_workers=8, batch_size=8, total_play=64, tempreature=1.0):
+    print("开始自我对局")
+    begin = time.time()
     mpe = MultiProcessNNEvaluatorGroup(model, num_workers, batch_size)
     resQ = Queue()
     workers = [Process(target=_play,
@@ -53,8 +55,14 @@ def self_play(model: NoGoNet, num_workers=16, batch_size=4, total_play=64, tempr
             mem_s.append(s)
             mem_p.append(p)
             mem_z.append(z)
-    print("done!")
-    pass  # todo:保存数据
+    print("正在保存数据")
+    mem_s = torch.stack(mem_s).type(dtype=torch.int8)
+    mem_p = torch.stack(mem_p).type(dtype=torch.uint8)  # for n < 255
+    mem_z = torch.tensor(mem_z).type(dtype=torch.int8)
+    data = {"s": mem_s, "p": mem_p, "z": mem_z}
+    torch.save(data, save_to)
+    print("数据已保存至：{}".format(save_to))
+    print("自我对局总计用时{:.1f}秒".format(time.time()-begin))
 
 
 if __name__ == "__main__":
