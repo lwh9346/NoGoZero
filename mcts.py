@@ -32,7 +32,7 @@ class BasicNNEvaluator(Evaluator):
         self.device = device
         self.model = model.to(device)
         self._eval_queue = []
-        self._results = Queue()
+        self._results = mp.Queue()
 
     def start_eval(self, s: Status) -> None:
         self._eval_queue.append(s.tensor())
@@ -40,9 +40,8 @@ class BasicNNEvaluator(Evaluator):
     @torch.no_grad()
     @torch.cuda.amp.autocast_mode.autocast()
     def get_eval_result(self) -> tuple[torch.Tensor, float]:
-        if not self._results.empty():
+        if len(self._eval_queue) == 0:  # 这边不能直接判断result是否为空，可能和多进程同步有关系
             return self._results.get()
-        self.model.to(self.device)
         ps, vs = self.model(torch.stack(self._eval_queue).to(self.device))
         ps, vs = ps.cpu(), vs.cpu()
         self._eval_queue = []
@@ -54,13 +53,24 @@ class BasicNNEvaluator(Evaluator):
 class MultiProcessNNEvaluator(Evaluator):
     def __init__(self, evalQ: mp.Queue, resQ: mp.Queue, idx: int) -> None:
         self._idx = idx
-        self._eval_queue = evalQ
-        self._results = resQ
+        self._eval_input = evalQ
+        self._eval_output = resQ
+        self._mini_batch = []
+        self._results = mp.Queue()
 
     def start_eval(self, s: Status) -> None:
-        self._eval_queue.put((s.tensor(), self._idx))
+        self._mini_batch.append(s.tensor())
 
     def get_eval_result(self) -> tuple[torch.Tensor, float]:
+        if len(self._mini_batch) == 0:  # 这边不能直接判断result是否为空，可能和多进程同步有关系
+            return self._results.get()
+        data = torch.stack(self._mini_batch).pin_memory()
+        self._mini_batch = []
+        self._eval_input.put((data, self._idx))
+        ps, vs = self._eval_output.get()
+        ps, vs = ps.cpu(), vs.cpu()
+        for i in range(len(ps)):
+            self._results.put((ps[i], float(vs[i])))
         return self._results.get()
 
 
@@ -68,34 +78,22 @@ class MultiProcessNNEvaluatorGroup():
     @staticmethod
     @torch.no_grad()
     @torch.cuda.amp.autocast_mode.autocast()
-    def _work_no_stop(evalQ: mp.Queue, resQ: list[mp.Queue], batch_size: int, model: NoGoNet):
+    def _work_no_stop(evalQ: mp.Queue, resQ: list[mp.Queue], model: NoGoNet):
         model = model.cuda()
         while True:
-            e, idx = [], []
-            for _ in range(batch_size):
-                try:
-                    s, i = evalQ.get(timeout=0.1)
-                except Exception:
-                    break
-                e.append(s)
-                idx.append(i)
-            if len(idx) == 0:
-                continue
-            e = torch.stack(e).cuda()
-            ps, vs = model(e)
-            ps, vs = ps.cpu(), vs.cpu()
-            for i in range(len(idx)):
-                resQ[idx[i]].put((ps[i], float(vs[i])))
+            s, i = evalQ.get()
+            ps, vs = model(s.cuda())
+            ps, vs = ps.cpu(), vs.cpu()  # 不然过去的全是0
+            resQ[i].put((ps, vs))
 
-    def __init__(self, model: NoGoNet, num_evaluator: int, batch_size=16, num_gpu_worker=4) -> None:
-        num_gpu_worker = min(num_gpu_worker, batch_size)
+    def __init__(self, model: NoGoNet, num_evaluator: int, num_gpu_worker=1) -> None:
         self._evalQ = mp.Queue()
         self._resQ = [mp.Queue() for _ in range(num_evaluator)]
         self.evaluators = [MultiProcessNNEvaluator(
             self._evalQ, self._resQ[i], i) for i in range(num_evaluator)]
         model = model.cpu()  # 不在cpu上的话复制过去会变成全0网络，等会再复制到cuda
         self._workers = [mp.Process(target=MultiProcessNNEvaluatorGroup._work_no_stop,
-                                    args=[self._evalQ, self._resQ, batch_size//num_gpu_worker, model]) for _ in range(num_gpu_worker)]
+                                    args=[self._evalQ, self._resQ, model]) for _ in range(num_gpu_worker)]
         for w in self._workers:
             w.start()
 
@@ -146,7 +144,7 @@ class MonteCarolTree:
                     t.o += 1
                     t = t.parent
             for i in range(mini_batch_size):
-                # get eval result
+                # get eval result and expand
                 t = mini_batch[i]
                 if not t.s.terminate:
                     t.is_leaf = False
@@ -195,24 +193,21 @@ if __name__ == "__main__":
     board_B = torch.tensor(
         [
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 1, 0, 0],
+            [0, 0, 0, 0, 1, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 1, 1, 1, 0, 0, 0, 0],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1],
         ]
     )
+    torch.manual_seed(0)
     s = Status(board_A, board_B)
-    eg = MultiProcessNNEvaluatorGroup(NoGoNet(), 2, 2)
+    eg = MultiProcessNNEvaluatorGroup(NoGoNet(), 1, 1)
     e1 = eg.evaluators[0]
-    e2 = eg.evaluators[1]
     mct1 = MonteCarolTree(s, e1)
-    mct2 = MonteCarolTree(s, e2)
-    import cProfile
-    mp.Process(target=mct2.search, args=[800]).start()
-    print(cProfile.run("mct1.search(800)"))
+    mct1.search(800)
     print(mct1.get_nmap())
     print(mct1.get_action())

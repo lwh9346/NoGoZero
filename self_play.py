@@ -1,4 +1,4 @@
-from mcts import MonteCarolTree, MultiProcessNNEvaluatorGroup, MultiProcessNNEvaluator
+from mcts import MonteCarolTree, MultiProcessNNEvaluatorGroup, MultiProcessNNEvaluator, BasicNNEvaluator
 from nogo import Action, Status
 from model import NoGoNet
 from torch.multiprocessing import Process, Queue
@@ -7,7 +7,7 @@ import torch
 import time
 
 
-def _play(evaluator: MultiProcessNNEvaluator, plays: int, resQ: Queue, idx: int, tempreature: float):
+def _play(evaluator: MultiProcessNNEvaluator, plays: int, resQ: Queue, idx: int, tempreature: float, mini_batch_size: int):
     torch.manual_seed(idx)
     for g in range(plays):
         s = Status()
@@ -15,7 +15,7 @@ def _play(evaluator: MultiProcessNNEvaluator, plays: int, resQ: Queue, idx: int,
         while not s.terminate:
             deep_search = random() < 0.25
             mct = MonteCarolTree(s, evaluator)
-            mct.search(160 if deep_search else 32)
+            mct.search(320 if deep_search else 64, mini_batch_size)
             a = mct.get_action(tempreature)
             mem_s.append(s.tensor().clone() if deep_search else None)
             mem_p.append(mct.get_nmap().clone() if deep_search else None)
@@ -34,13 +34,13 @@ def _play(evaluator: MultiProcessNNEvaluator, plays: int, resQ: Queue, idx: int,
             resQ.put((mem_s[i], mem_p[i], mem_z[i]))
 
 
-def self_play(model: NoGoNet, save_to: str, num_workers=8, batch_size=8, total_play=64, tempreature=1.0):
+def self_play(model: NoGoNet, save_to: str, num_worker=4, num_gpu_worker=1, batch_size=16, total_play=64, tempreature=1.0):
     print("开始自我对局")
     begin = time.time()
-    mpe = MultiProcessNNEvaluatorGroup(model, num_workers, batch_size)
+    mpe = MultiProcessNNEvaluatorGroup(model, num_worker, num_gpu_worker)
     resQ = Queue()
     workers = [Process(target=_play,
-                       args=[mpe.evaluators[i], total_play//num_workers, resQ, i, tempreature]) for i in range(num_workers)]
+                       args=[mpe.evaluators[i], total_play//num_worker, resQ, i, tempreature, batch_size]) for i in range(num_worker)]
     for w in workers:
         w.start()
     working = True
@@ -66,4 +66,4 @@ def self_play(model: NoGoNet, save_to: str, num_workers=8, batch_size=8, total_p
 
 
 if __name__ == "__main__":
-    self_play(NoGoNet())
+    self_play(NoGoNet(), "self_play_test.pth")
